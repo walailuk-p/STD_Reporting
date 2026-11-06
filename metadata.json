@@ -1,0 +1,6 @@
+{
+  "name": "ระบบประกาศคะแนนนักศึกษา (Student Score Portal)",
+  "description": "ระบบประกาศคะแนนนักศึกษาสำหรับอาจารย์และนักศึกษา รองรับการนำเข้าไฟล์ CSV และการยืนยันตัวตนด้วยรหัส PIN 6 หลัก ปลอดภัยด้วย Firebase Spark Plan",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

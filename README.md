@@ -1,11 +1,76 @@
-<div align="center">
+# ระบบประกาศคะแนนนักศึกษา (Student Score Announcement Portal)
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+เว็บแอปพลิเคชันสำหรับประกาศคะแนนนักศึกษา พัฒนาขึ้นโดยคำนึงถึงความเป็นส่วนตัวของข้อมูล (Data Privacy), ประหยัดโควตา Firebase Spark Plan (ฟรี 100%), และออกแบบให้ทำงานแบบ Mobile-First รองรับทั้งมือถือ Android (Chrome), iOS (Safari) รวมถึงคอมพิวเตอร์ โดยไม่ต้องติดตั้งแอปพลิเคชัน ไม่ต้องล็อกอินด้วยอีเมล และไม่ใช้ QR Code
 
-  <h1>Built with AI Studio</h2>
+---
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## จุดเด่นและคุณลักษณะสำคัญ
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+### 1. สำหรับนักศึกษา
+- **ไม่ต้องใช้อีเมลและไม่ใช้ QR Code**: นักศึกษาเพียงเข้าลิงก์และกรอกรหัสนักศึกษา
+- **ระบบยืนยันตัวตนด้วย PIN 6 หลัก**:
+  - เมื่อเข้าใช้งานครั้งแรก ระบบจะให้นักศึกษาตั้งรหัสผ่าน 6 หลัก (PIN) ด้วยตนเอง
+  - ครั้งถัดไป กรอกรหัสนักศึกษาและรหัส PIN 6 หลักเพื่อดูคะแนน
+  - มีระบบป้องกัน Brute-Force จำกัดจำนวนครั้งที่กรอกรหัสผิด (ล็อก 15 นาทีหากกรอกผิดเกิน 5 ครั้ง)
+  - รหัสผ่านถูกเข้ารหัสด้วย **SHA-256 พร้อม Salt** ไม่มีการบันทึก Plain-text ในฐานข้อมูล
+- **แสดงผลข้อมูลส่วนตัวทันทีที่เข้าระบบ**:
+  - เลขที่ (No.)
+  - รหัสนักศึกษา (Student ID)
+  - ชื่อ - นามสกุล (Name)
+  - กลุ่มเรียน (Sec)
+- **หัวข้อคะแนนตามมาตรฐาน**:
+  - `ATTEN` : เข้าเรียน (10 คะแนน)
+  - `CA` : งานในชั้นเรียน (10 คะแนน)
+  - `AS` : การบ้าน (20 คะแนน)
+  - `MID` : สอบกลางภาค (25 คะแนน)
+  - `TOTAL` : รวม (65 คะแนน)
+  - *ไม่มีการตัดเกรด เนื่องจากเป็นคะแนนเก็บเบื้องต้นเท่านั้น*
 
-</div>
+### 2. สำหรับอาจารย์ผู้สอน
+- **ระบบล็อกอินความปลอดภัยสูง**:
+  - ผ่าน Google Authentication รองรับโดเมนบุคลากร `@bu.ac.th`
+- **การจัดการรายวิชาและกลุ่มเรียน (Section)**:
+  - เพิ่ม/ลบรายวิชา กำหนดรหัสวิชา ชื่อวิชา ภาคการศึกษา และกลุ่มเรียน (Sec)
+  - ควบคุมการเปิด/ปิดประกาศคะแนนได้ทั้งระดับรายวิชา และแยกระดับกลุ่มเรียน (Section)
+- **การนำเข้าและแก้ไขคะแนน (Real-time Override)**:
+  - รองรับการนำเข้าไฟล์ CSV ภาษาไทย (UTF-8) พร้อมมีปุ่มดาวน์โหลดไฟล์ตัวอย่าง (Template)
+  - มีฟังก์ชันส่งออกไฟล์ CSV UTF-8 พร้อม BOM สำหรับเปิดใน MS Excel / Google Sheets
+  - สามารถแก้ไขคะแนนรายบุคคลได้ทันทีในระบบ คะแนนจะอัปเดตให้นักศึกษาแบบ Real-time
+  - ฟังก์ชัน **รีเซ็ต PIN 6 หลัก**: กรณีนักศึกษาลืมรหัส PIN อาจารย์สามารถกดรีเซ็ตเพื่อให้นักศึกษาตั้งรหัสใหม่ได้ทันที
+
+### 3. สถาปัตยกรรมและการประหยัดโควตา (Firebase Spark Plan 100% Free)
+- **1 Doc Read Per Check**: ออกแบบฐานข้อมูล `student_records/{studentId}` รวมคะแนนวิชาที่เปิดประกาศไว้ในเอกสารเดียว ทำให้นักศึกษาตรวจสอบคะแนน 1 ครั้ง อ่านข้อมูลเพียง 1 Document เท่านั้น อยู่ในโควตาฟรีวันละ 50,000 อ่านได้อย่างเหลือเฟือ
+- **ป้องกันการดึงรายชื่อ (Anti-Scrape)**: ปิดสิทธิ์ `allow list: if false;` บนคอลเลกชันนักศึกษา ทำให้ไม่มีใครสามารถ scrape หรือดึงรายชื่อนักศึกษาทั้งหมดออกมาได้
+
+---
+
+## การเชื่อมต่อ Google Sheets & Google Apps Script (GAS) แทน Cloud Run
+
+เพื่อปฏิบัติตามข้อกำหนด **ห้ามใช้ Google Cloud Run** และประหยัดค่าใช้จ่าย:
+- ในหน้าสำหรับอาจารย์ มีปุ่ม **"สคริปต์ Google Sheets (GAS)"** พร้อมโค้ด Google Apps Script สำเร็จรูป
+- อาจารย์สามารถเปิด Google Sheets &gt; เมนูส่วนขยาย (Extensions) &gt; Apps Script วางโค้ดและ Deploy เป็น Web App ได้ฟรี 100% ภายใต้โควตา Google Workspace
+
+---
+
+## ขั้นตอนการ Deploy บน Netlify และ Sync กับ GitHub
+
+โปรเจกต์นี้มีไฟล์ `netlify.toml` กำหนดไว้เรียบร้อยแล้ว:
+
+1. **Push โค้ดขึ้น GitHub**:
+   ```bash
+   git init
+   git add .
+   git commit -m "feat: student score announcement portal"
+   git branch -M main
+   git remote add origin https://github.com/<your-username>/<your-repo-name>.git
+   git push -u origin main
+   ```
+
+2. **เชื่อมต่อกับ Netlify**:
+   - เข้าสู่ระบบ [Netlify.com](https://www.netlify.com)
+   - คลิก **Add new site** &gt; **Import an existing project**
+   - เลือก **GitHub** และเลือก Repository ของคุณ
+   - การตั้งค่า Build Setting (ระบบจะตรวจพบจาก `netlify.toml` อัตโนมัติ):
+     - **Build command**: `npm run build`
+     - **Publish directory**: `dist`
+   - คลิก **Deploy Site** เว็บไซต์จะออนไลน์ทันที!

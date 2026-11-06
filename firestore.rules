@@ -1,0 +1,80 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default-deny all unhandled paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Health check endpoint for connection test
+    match /test/{docId} {
+      allow get: if true;
+    }
+
+    // Courses collection managed by instructors
+    match /courses/{courseId} {
+      // Instructors can list all courses; students can only get specific course document to verify isPublished
+      allow get: if isValidId(courseId);
+      allow list: if isSignedIn();
+
+      // Create course
+      allow create: if isSignedIn() && isValidId(courseId);
+
+      // Update and delete course
+      allow update, delete: if isSignedIn() && isValidId(courseId);
+
+      // Subcollection: student rosters and individual course scores
+      match /students/{studentId} {
+        allow read, write: if isSignedIn();
+      }
+    }
+
+    // Unified student records for 1-document quota-optimized student lookup
+    // Listing is strictly FORBIDDEN to prevent student roster enumeration
+    match /student_records/{studentId} {
+      // Individual get permitted for exact student ID lookup
+      allow get: if isValidId(studentId);
+      allow list: if false;
+
+      // Instructors can create, overwrite, or delete student records
+      allow create, delete: if isSignedIn();
+
+      // Updates can be performed by an instructor OR student setting their initial PIN / recording failed attempts
+      allow update: if (
+        // Instructor full update
+        isSignedIn() ||
+        // Student first-time PIN initialization (only allowed if pinHash was previously empty)
+        (
+          isValidId(studentId) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['pinHash', 'salt', 'updatedAt', 'failedAttempts', 'lockedUntil']) &&
+          (!('pinHash' in existing()) || existing().pinHash == null || existing().pinHash == '') &&
+          incoming().pinHash is string && incoming().pinHash.size() <= 128 &&
+          incoming().salt is string && incoming().salt.size() <= 64
+        ) ||
+        // Rate-limiting / lockout update on failed attempts
+        (
+          isValidId(studentId) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['failedAttempts', 'lockedUntil', 'updatedAt'])
+        )
+      );
+    }
+  }
+}

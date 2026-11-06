@@ -1,0 +1,150 @@
+{
+  "entities": {
+    "Course": {
+      "title": "Course",
+      "description": "Represents an academic course managed by an instructor.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier of the course"
+        },
+        "courseCode": {
+          "type": "string",
+          "description": "Course code e.g. CS101, IT202"
+        },
+        "courseName": {
+          "type": "string",
+          "description": "Course name in Thai or English"
+        },
+        "semester": {
+          "type": "string",
+          "description": "Semester/Academic year e.g. 1/2567"
+        },
+        "sections": {
+          "type": "array",
+          "description": "List of active sections for this course"
+        },
+        "scoreColumns": {
+          "type": "array",
+          "description": "Evaluation items: ATTEN, CA, AS, MID, TOTAL"
+        },
+        "isPublished": {
+          "type": "boolean",
+          "description": "Whether the score announcement is live"
+        },
+        "publishedSections": {
+          "type": "array",
+          "description": "Sections currently published"
+        },
+        "instructorUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the instructor"
+        },
+        "instructorEmail": {
+          "type": "string",
+          "description": "Google email of the instructor (@bu.ac.th)"
+        },
+        "studentCount": {
+          "type": "number",
+          "description": "Total number of students enrolled"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last updated timestamp"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["courseCode", "courseName", "instructorUid", "instructorEmail"]
+    },
+    "CourseStudent": {
+      "title": "CourseStudent",
+      "description": "Individual student record within a specific course.",
+      "type": "object",
+      "properties": {
+        "studentId": {
+          "type": "string",
+          "description": "Student identification number (digits)"
+        },
+        "no": {
+          "type": "number",
+          "description": "Student roster number"
+        },
+        "name": {
+          "type": "string",
+          "description": "Full name of the student"
+        },
+        "sec": {
+          "type": "string",
+          "description": "Section name/number"
+        },
+        "scores": {
+          "type": "object",
+          "description": "Key-value pair of scores: ATTEN, CA, AS, MID, TOTAL"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp of last score update"
+        }
+      },
+      "required": ["studentId", "name", "sec"]
+    },
+    "StudentRecord": {
+      "title": "StudentRecord",
+      "description": "Unified 1-document student record for private score checking and PIN authentication.",
+      "type": "object",
+      "properties": {
+        "studentId": {
+          "type": "string",
+          "description": "Student ID e.g. 1650701234"
+        },
+        "name": {
+          "type": "string",
+          "description": "Student full name"
+        },
+        "pinHash": {
+          "type": "string",
+          "description": "Hashed 6-digit PIN with salt (never stored in plain text)"
+        },
+        "salt": {
+          "type": "string",
+          "description": "Unique random cryptographic salt for password hashing"
+        },
+        "failedAttempts": {
+          "type": "number",
+          "description": "Consecutive failed PIN attempt counter"
+        },
+        "lockedUntil": {
+          "type": "number",
+          "description": "Epoch timestamp until which PIN verification is locked"
+        },
+        "enrolledCourses": {
+          "type": "object",
+          "description": "Map of enrolled courses score data for single-document read efficiency"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["studentId"]
+    }
+  },
+  "firestore": {
+    "/courses/{courseId}": {
+      "schema": "Course",
+      "description": "Collection of courses managed by university instructors"
+    },
+    "/courses/{courseId}/students/{studentId}": {
+      "schema": "CourseStudent",
+      "description": "Roster and score breakdown for each student in the course"
+    },
+    "/student_records/{studentId}": {
+      "schema": "StudentRecord",
+      "description": "Single-document score storage for student portal to minimize reads"
+    }
+  }
+}
