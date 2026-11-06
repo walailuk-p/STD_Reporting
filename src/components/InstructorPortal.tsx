@@ -1239,11 +1239,16 @@ export const InstructorPortal: React.FC<InstructorPortalProps> = ({ user }) => {
                 <div className="flex-1 space-y-2">
                   <div className="font-bold text-sm text-rose-950 flex items-center justify-between">
                     <span>การเข้าสู่ระบบไม่สำเร็จ</span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 bg-rose-200/70 rounded text-rose-900 font-normal">
-                      Security Alert
-                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setLoginError(null)}
+                      className="text-rose-500 hover:text-rose-800 p-1 cursor-pointer transition-colors"
+                      title="ปิดข้อความแจ้งเตือน"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
-                  <p className="text-rose-900 leading-relaxed font-semibold">
+                  <p className="text-rose-900 leading-relaxed font-medium">
                     {loginError}
                   </p>
 
@@ -1679,10 +1684,9 @@ export const InstructorPortal: React.FC<InstructorPortalProps> = ({ user }) => {
                         <div>
                           <div className="font-bold text-sm text-slate-900 flex items-center">
                             <span>{sec}</span>
-                            <span className={`ml-2 w-2 h-2 rounded-full ${isSecPublished ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
                           </div>
                           <span className="text-[11px] text-slate-500 mt-0.5 block">
-                            นักศึกษา {countInSec} คน &nbsp;•&nbsp; {isSecPublished ? 'ประกาศอยู่' : 'ปิดประกาศ'}
+                            นักศึกษา {countInSec} คน · {isSecPublished ? 'เปิดประกาศ' : 'ปิดประกาศ'}
                           </span>
                         </div>
 
@@ -3161,6 +3165,38 @@ export const InstructorPortal: React.FC<InstructorPortalProps> = ({ user }) => {
                     >
                       ลองบันทึกอีกครั้ง
                     </button>
+                  </div>
+                </div>
+              )}
+              {/* Real-time Batch Write Progress Bar */}
+              {isSavingCsv && (
+                <div className="bg-indigo-50/70 border border-indigo-200 rounded-2xl p-4 space-y-2 animate-in fade-in">
+                  <div className="flex items-center justify-between text-xs font-semibold text-indigo-950">
+                    <span className="flex items-center">
+                      <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin text-indigo-600" />
+                      กำลังบันทึกข้อมูลนักศึกษาลงฐานข้อมูล...
+                    </span>
+                    <span className="font-mono text-indigo-700 font-bold">
+                      {saveCsvProgress && saveCsvProgress.total > 0
+                        ? `${Math.round((saveCsvProgress.current / saveCsvProgress.total) * 100)}%`
+                        : 'กำลังเริ่ม...'}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
+                    <div 
+                      className="bg-indigo-600 h-2.5 rounded-full transition-all duration-300 ease-out"
+                      style={{
+                        width: saveCsvProgress && saveCsvProgress.total > 0
+                          ? `${Math.min(100, Math.round((saveCsvProgress.current / saveCsvProgress.total) * 100))}%`
+                          : '10%'
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
+                    <span>
+                      บันทึกแล้ว {saveCsvProgress ? saveCsvProgress.current : 0} จากทั้งหมด {saveCsvProgress ? saveCsvProgress.total : csvPreviewData.length} รายการ
+                    </span>
+                    <span>Batch Size: 25 docs/batch</span>
                   </div>
                 </div>
               )}

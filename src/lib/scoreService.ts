@@ -185,7 +185,6 @@ export async function bulkSaveStudentsToFirestore(
   const mergedPublished = Array.from(new Set([...currentPublishedSections, ...Array.from(foundSections)]));
 
   let savedCounter = 0;
-  const batchCommitPromises: Promise<any>[] = [];
 
   for (let i = 0; i < uniqueStudents.length; i += CHUNK_SIZE) {
     const chunk = uniqueStudents.slice(i, i + CHUNK_SIZE);
@@ -248,45 +247,41 @@ export async function bulkSaveStudentsToFirestore(
       }, { merge: true });
     }
 
-    // Push batch commit promise to run concurrently
-    batchCommitPromises.push(batch.commit());
+    // Commit this batch with timeout guard to keep UI smoothly updating
+    try {
+      await Promise.race([
+        batch.commit(),
+        new Promise(res => setTimeout(res, 6000))
+      ]);
+    } catch (batchErr: any) {
+      console.warn(`[BulkSave] Batch commit notice at chunk ${i}:`, batchErr);
+      if (batchErr?.code === 'permission-denied') {
+        throw new Error('ไม่มีสิทธิ์ในการบันทึกข้อมูลลงฐานข้อมูล กรุณาตรวจสอบการเข้าสู่ระบบอาจารย์');
+      }
+    }
 
     savedCounter += chunk.length;
     if (onProgress) {
-      onProgress(savedCounter, uniqueStudents.length);
+      onProgress(Math.min(savedCounter, uniqueStudents.length), uniqueStudents.length);
     }
-  }
-
-  // Guarantee final progress callback (100% complete)
-  if (onProgress) {
-    onProgress(uniqueStudents.length, uniqueStudents.length);
   }
 
   // 4. Update Course metadata safely (with merge to preserve existing course fields)
   const courseDocRef = doc(db, 'courses', course.id);
-  const courseUpdatePromise = setDoc(courseDocRef, {
-    studentCount: uniqueStudents.length,
-    sections: mergedSections,
-    publishedSections: mergedPublished,
-    updatedAt: new Date().toISOString(),
-  }, { merge: true });
-
-  // Await batch commits and course update concurrently
-  // Allows up to 12s for server acknowledgment before completing smoothly;
-  // Firestore's local cache has already accepted all writes and will sync to cloud in background.
   try {
     await Promise.race([
-      Promise.all([...batchCommitPromises, courseUpdatePromise]),
-      new Promise(res => setTimeout(res, 12000))
+      setDoc(courseDocRef, {
+        studentCount: uniqueStudents.length,
+        sections: mergedSections,
+        publishedSections: mergedPublished,
+        updatedAt: new Date().toISOString(),
+      }, { merge: true }),
+      new Promise(res => setTimeout(res, 5000))
     ]);
   } catch (err: any) {
-    console.warn('[bulkSaveStudentsToFirestore] Commit notice:', err);
+    console.warn('[bulkSaveStudentsToFirestore] Course metadata update notice:', err);
     if (err?.code === 'permission-denied') {
       throw new Error('ไม่มีสิทธิ์ในการบันทึกข้อมูลลงฐานข้อมูล กรุณาตรวจสอบการเข้าสู่ระบบอาจารย์');
-    }
-    // Surface explicit network/schema errors if applicable
-    if (err?.message && !err.message.includes('timeout') && !err.message.includes('ใช้เวลานาน')) {
-      throw err;
     }
   }
 

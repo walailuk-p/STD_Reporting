@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, getDocWithRetry, handleFirestoreError, OperationType } from '../lib/firebase';
 import { hashPin, verifyPin, generateSalt } from '../lib/crypto';
 import { StudentRecord, EnrolledCourseScore } from '../types';
 import { 
@@ -72,9 +72,9 @@ export const StudentPortal: React.FC = () => {
     setErrorMsg(null);
 
     try {
-      // 1. Direct query strictly on /student_records/{studentId}
+      // 1. Direct query strictly on /student_records/{studentId} with retry and automatic reconnect
       const studentDocRef = doc(db, 'student_records', cleanId);
-      const studentSnap = await getDoc(studentDocRef);
+      const studentSnap = await getDocWithRetry(studentDocRef);
 
       if (!studentSnap.exists()) {
         setErrorMsg('ไม่พบข้อมูลของรหัสนักศึกษานี้ในระบบ หรืออาจารย์ยังไม่ได้นำเข้ารายชื่อ');
@@ -99,7 +99,7 @@ export const StudentPortal: React.FC = () => {
         try {
           const courseRef = doc(db, 'courses', course.courseId);
           const courseSnap = await Promise.race([
-            getDoc(courseRef),
+            getDocWithRetry(courseRef, 2, 400),
             new Promise<null>(res => setTimeout(() => res(null), 5000))
           ]);
 
@@ -140,7 +140,12 @@ export const StudentPortal: React.FC = () => {
       return true;
     } catch (err: any) {
       console.error('Error fetching student scores:', err);
-      setErrorMsg('เกิดข้อผิดพลาดในการโหลดข้อมูลผลคะแนน กรุณาลองใหม่อีกครั้ง');
+      const isOffline = String(err?.message || '').toLowerCase().includes('offline') || err?.code === 'unavailable';
+      if (isOffline) {
+        setErrorMsg('ไม่สามารถเชื่อมต่อฐานข้อมูลได้ชั่วคราว (Client Offline) กรุณาตรวจสอบสัญญาณอินเทอร์เน็ต');
+      } else {
+        setErrorMsg('เกิดข้อผิดพลาดในการโหลดข้อมูลผลคะแนน กรุณาลองใหม่อีกครั้ง');
+      }
       return false;
     } finally {
       if (showGlobalLoading) {
@@ -189,9 +194,9 @@ export const StudentPortal: React.FC = () => {
     setSuccessMsg(null);
 
     try {
-      // Exactly 1 document read from /student_records/{studentId}
+      // Exactly 1 document read from /student_records/{studentId} with automatic retry
       const docRef = doc(db, 'student_records', cleanId);
-      const docSnap = await getDoc(docRef);
+      const docSnap = await getDocWithRetry(docRef);
 
       if (!docSnap.exists()) {
         setErrorMsg('ไม่พบข้อมูลของรหัสนักศึกษานี้ในระบบ หรืออาจารย์ยังไม่ได้นำเข้ารายชื่อ');
@@ -211,9 +216,14 @@ export const StudentPortal: React.FC = () => {
         // Returning user: verify PIN
         setStep('enter_pin');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error fetching student record:', err);
-      setErrorMsg('เกิดข้อผิดพลาดในการเชื่อมต่อฐานข้อมูล กรุณาลองใหม่อีกครั้ง');
+      const isOffline = String(err?.message || '').toLowerCase().includes('offline') || err?.code === 'unavailable';
+      if (isOffline) {
+        setErrorMsg('ไม่สามารถเชื่อมต่อฐานข้อมูลได้ชั่วคราว (Client Offline) กรุณาตรวจสอบสัญญาณอินเทอร์เน็ต แล้วกด "ถัดไป" อีกครั้ง');
+      } else {
+        setErrorMsg('เกิดข้อผิดพลาดในการเชื่อมต่อฐานข้อมูล กรุณาลองใหม่อีกครั้ง');
+      }
     } finally {
       setLoading(false);
     }

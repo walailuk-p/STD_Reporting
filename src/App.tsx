@@ -4,7 +4,7 @@ import { auth, isAllowedInstructorEmail } from './lib/firebase';
 import { Navbar } from './components/Navbar';
 import { StudentPortal } from './components/StudentPortal';
 import { InstructorPortal } from './components/InstructorPortal';
-import { GraduationCap, ShieldCheck, Heart, Sparkles, BookOpen } from 'lucide-react';
+import { GraduationCap } from 'lucide-react';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<'student' | 'instructor'>(() => {
@@ -14,7 +14,6 @@ export default function App() {
     return 'student';
   });
   const [instructorUser, setInstructorUser] = useState<FirebaseUser | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async user => {
@@ -30,12 +29,10 @@ export default function App() {
           }
           await signOut(auth);
           setInstructorUser(null);
-          setAuthLoading(false);
           return;
         }
       }
       setInstructorUser(user);
-      setAuthLoading(false);
     });
     return () => unsubscribe();
   }, []);
@@ -51,7 +48,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-800 antialiased selection:bg-indigo-500 selection:text-white">
-      {/* Header Navigation */}
+      {/* Top Bar Navigation */}
       <Navbar
         currentTab={currentTab}
         onTabChange={setCurrentTab}
@@ -61,60 +58,45 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 pb-16">
-        {/* Subtle decorative top bar */}
-        <div className="h-1 bg-gradient-to-r from-amber-500 via-indigo-600 to-emerald-500" />
-
         {currentTab === 'student' ? (
-          <div>
-            {/* Quick Hero Banner on Student Tab */}
-            <div className="max-w-2xl mx-auto pt-6 px-4 text-center">
-              <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200/60 mb-2">
-                <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                <span>ระบบรักษาความเป็นส่วนตัวของข้อมูล (Data Privacy)</span>
-              </div>
-            </div>
-
-            <StudentPortal />
-          </div>
+          <StudentPortal />
         ) : (
           <InstructorPortal user={instructorUser} />
         )}
       </main>
 
       {/* Footer */}
-      <footer className="bg-white border-t border-slate-200 py-8 px-4 text-center text-xs text-slate-500">
-        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+      <footer className="bg-white border-t border-slate-200 py-6 px-4 text-xs text-slate-500">
+        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
           <div className="flex items-center space-x-2">
-            <div className="w-6 h-6 rounded-lg bg-indigo-600 flex items-center justify-center text-white">
-              <GraduationCap className="w-3.5 h-3.5" />
+            <div className="w-5 h-5 rounded-md bg-slate-900 flex items-center justify-center text-white">
+              <GraduationCap className="w-3 h-3 text-indigo-400" />
             </div>
             <span className="font-semibold text-slate-700">
               ระบบประกาศคะแนนนักศึกษา
             </span>
-            <span className="text-slate-400">|</span>
-            <span className="text-slate-500">Firebase Spark Plan (No Cost)</span>
+            <span className="text-slate-300">·</span>
+            <span className="text-slate-500">มหาวิทยาลัยกรุงเทพ</span>
           </div>
 
-          <div className="flex flex-wrap items-center justify-center gap-4 text-[11px] text-slate-400">
-            <span>• ดึงข้อมูลเพียง 1 Doc / ครั้งเพื่อประหยัด Quota</span>
-            <span>• รหัสผ่านเข้ารหัสแบบ SHA-256 with Salt</span>
-            <span>• Deploy บน Netlify ได้ทันที</span>
-          </div>
-
-          <div className="text-[11px] text-slate-400">
+          <div className="flex items-center gap-4 text-slate-500">
             {currentTab === 'student' ? (
               <button
+                type="button"
                 onClick={() => setCurrentTab('instructor')}
-                className="text-indigo-600 hover:underline font-medium cursor-pointer"
+                className="group inline-flex items-center gap-1.5 text-slate-500 hover:text-indigo-600 font-medium transition-colors cursor-pointer py-1 px-2 rounded-md hover:bg-slate-50"
               >
-                เข้าสู่ระบบสำหรับอาจารย์ผู้สอน &rarr;
+                <span>สำหรับอาจารย์ผู้สอน เข้าสู่ระบบจัดการคะแนนที่นี่</span>
+                <span className="transition-transform group-hover:translate-x-0.5" aria-hidden="true">&rarr;</span>
               </button>
             ) : (
               <button
+                type="button"
                 onClick={() => setCurrentTab('student')}
-                className="text-indigo-600 hover:underline font-medium cursor-pointer"
+                className="group inline-flex items-center gap-1.5 text-slate-500 hover:text-indigo-600 font-medium transition-colors cursor-pointer py-1 px-2 rounded-md hover:bg-slate-50"
               >
-                &larr; กลับสู่หน้าจอสำหรับนักศึกษา
+                <span className="transition-transform group-hover:-translate-x-0.5" aria-hidden="true">&larr;</span>
+                <span>กลับสู่หน้าจอสำหรับนักศึกษา</span>
               </button>
             )}
           </div>

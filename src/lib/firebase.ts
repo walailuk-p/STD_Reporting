@@ -7,7 +7,16 @@ import {
   getRedirectResult, 
   signOut 
 } from 'firebase/auth';
-import { getFirestore, initializeFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { 
+  getFirestore, 
+  initializeFirestore, 
+  doc, 
+  getDoc,
+  getDocFromServer, 
+  enableNetwork,
+  DocumentReference,
+  DocumentSnapshot
+} from 'firebase/firestore';
 import localAppletConfig from '../../firebase-applet-config.json';
 
 // Support both Netlify/Vercel/Production Environment Variables and local applet config
@@ -26,19 +35,76 @@ export const resolvedFirebaseConfig = {
 
 const app = getApps().length === 0 ? initializeApp(resolvedFirebaseConfig) : getApp();
 
-// Use specific firestore database ID with autoDetectLongPolling to avoid WebChannel stream stalls in iframes & proxies
+// Use experimentalForceLongPolling in browser to prevent WebChannel streaming stalls and "the client is offline" errors in iframes
+const isBrowser = typeof window !== 'undefined';
+const firestoreSettings = isBrowser
+  ? { experimentalForceLongPolling: true }
+  : {};
+
 let firestoreInstance;
 try {
   firestoreInstance = (resolvedFirebaseConfig.firestoreDatabaseId && resolvedFirebaseConfig.firestoreDatabaseId !== '(default)')
-    ? initializeFirestore(app, { experimentalAutoDetectLongPolling: true }, resolvedFirebaseConfig.firestoreDatabaseId)
-    : initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+    ? initializeFirestore(app, firestoreSettings, resolvedFirebaseConfig.firestoreDatabaseId)
+    : initializeFirestore(app, firestoreSettings);
 } catch {
   firestoreInstance = (resolvedFirebaseConfig.firestoreDatabaseId && resolvedFirebaseConfig.firestoreDatabaseId !== '(default)')
     ? getFirestore(app, resolvedFirebaseConfig.firestoreDatabaseId)
     : getFirestore(app);
 }
 
+// Automatically reconnect when browser network comes back online
+if (isBrowser) {
+  window.addEventListener('online', () => {
+    try {
+      enableNetwork(firestoreInstance);
+    } catch {
+      // Ignore network re-enable errors
+    }
+  });
+}
+
 export const db = firestoreInstance;
+export { enableNetwork };
+
+/**
+ * Safely fetches a Firestore document with retry and automatic network reconnection.
+ * Handles transient offline states ("Failed to get document because the client is offline", code: "unavailable")
+ */
+export async function getDocWithRetry(
+  docRef: DocumentReference,
+  maxRetries = 3,
+  delayMs = 600
+): Promise<DocumentSnapshot> {
+  let lastError: any = null;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const snap = await getDoc(docRef);
+      return snap;
+    } catch (err: any) {
+      lastError = err;
+      const errorMsg = String(err?.message || err || '').toLowerCase();
+      const isOfflineError =
+        errorMsg.includes('the client is offline') ||
+        errorMsg.includes('client is offline') ||
+        err?.code === 'unavailable' ||
+        errorMsg.includes('unavailable') ||
+        errorMsg.includes('network-request-failed');
+
+      if (isOfflineError && attempt < maxRetries - 1) {
+        try {
+          await enableNetwork(db);
+        } catch {
+          // Ignore enableNetwork errors during retry loop
+        }
+        await new Promise(resolve => setTimeout(resolve, delayMs * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError;
+}
+
 export const auth = getAuth(app);
 
 // Helper for verifying authorized instructor accounts (BU domain + runtime project owner)
