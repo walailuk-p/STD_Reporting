@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { db, getDocWithRetry, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, getDocWithRetry, updateDocWithRetry, handleFirestoreError, OperationType } from '../lib/firebase';
 import { hashPin, verifyPin, generateSalt } from '../lib/crypto';
 import { StudentRecord, EnrolledCourseScore } from '../types';
 import { 
@@ -84,19 +84,19 @@ export const StudentPortal: React.FC = () => {
       const data = studentSnap.data() as StudentRecord;
       setStudentRecord(data);
 
-      // 2. Extract enrolled courses and check Condition 4 (Course & Section Visibility)
+      // 2. Extract enrolled courses and strictly verify Condition 4 (Course & Section Visibility)
       const enrolledList: EnrolledCourseScore[] = data.enrolledCourses
         ? Object.values(data.enrolledCourses)
         : [];
 
-      // Immediately populate initial list from local data so UI displays instantly without lag
-      const initialVisible = enrolledList.filter(c => c.isPublished !== false);
-      initialVisible.sort((a, b) => (a.courseCode || '').localeCompare(b.courseCode || ''));
-      setLivePublishedCourses(initialVisible);
-
-      // Verify each course's live visibility from /courses/{courseId} with 5s timeout guard
+      // STRICT DATA PRIVACY: Do NOT optimistically show courses.
+      // A course is ONLY visible if:
+      // a) courseSnap.exists() === true
+      // b) courseData.isPublished === true
+      // c) courseData.publishedSections includes the student's exact section (course.sec)
       const visibilityPromises = enrolledList.map(async course => {
         try {
+          if (!course.courseId) return null;
           const courseRef = doc(db, 'courses', course.courseId);
           const courseSnap = await Promise.race([
             getDocWithRetry(courseRef, 2, 400),
@@ -105,30 +105,35 @@ export const StudentPortal: React.FC = () => {
 
           if (courseSnap && courseSnap.exists()) {
             const courseData = courseSnap.data();
-            // Section-level visibility (สวิตช์เปิด/ปิดประกาศแยกตามกลุ่มเรียน เช่น Sec 101, Sec 206A)
-            const isSecOpen = Array.isArray(courseData.publishedSections)
-              ? courseData.publishedSections.includes(course.sec)
-              : true;
 
-            // Show card if section is open (Section-level Visibility)
-            if (isSecOpen) {
-              return {
-                ...course,
-                isPublished: true,
-                courseName: courseData.courseName || course.courseName,
-                courseCode: courseData.courseCode || course.courseCode,
-                semester: courseData.semester || course.semester,
-              };
+            // Condition b: Course-level publication MUST be true
+            if (courseData.isPublished !== true) {
+              return null;
             }
-            // Closed for this section -> Hide from view
-            return null;
-          } else {
-            // Fallback to stored isPublished flag if fetch timed out or doc doesn't exist
-            return course.isPublished ? course : null;
+
+            // Condition c: Student's section MUST be explicitly included in publishedSections
+            const isSecOpen = Array.isArray(courseData.publishedSections) &&
+              courseData.publishedSections.includes(course.sec);
+
+            if (!isSecOpen) {
+              return null;
+            }
+
+            // All strict privacy checks passed
+            return {
+              ...course,
+              isPublished: true,
+              courseName: courseData.courseName || course.courseName,
+              courseCode: courseData.courseCode || course.courseCode,
+              semester: courseData.semester || course.semester,
+            };
           }
+
+          // Course document missing or timed out -> strictly hide
+          return null;
         } catch (e) {
-          // If offline or query fallback, use stored isPublished flag
-          return course.isPublished ? course : null;
+          // Any network or query error -> strictly hide
+          return null;
         }
       });
 
@@ -256,19 +261,14 @@ export const StudentPortal: React.FC = () => {
 
       const docRef = doc(db, 'student_records', studentRecord.studentId);
       
-      // Update Firestore with 6-second timeout race to prevent indefinite freeze
-      await Promise.race([
-        updateDoc(docRef, {
-          pinHash: hashed,
-          salt: salt,
-          failedAttempts: 0,
-          lockedUntil: 0,
-          updatedAt: new Date().toISOString(),
-        }),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('การเชื่อมต่อกับระบบฐานข้อมูลใช้เวลานานเกินไป กรุณาลองใหม่อีกครั้ง')), 6000)
-        ),
-      ]);
+      // Update Firestore with retry and adequate timeout (prevents premature timeout aborts)
+      await updateDocWithRetry(docRef, {
+        pinHash: hashed,
+        salt: salt,
+        failedAttempts: 0,
+        lockedUntil: 0,
+        updatedAt: new Date().toISOString(),
+      });
 
       // Update in-memory studentRecord immediately for instant UI responsiveness
       const updatedRecord: StudentRecord = {
@@ -280,14 +280,6 @@ export const StudentPortal: React.FC = () => {
         updatedAt: new Date().toISOString(),
       };
       setStudentRecord(updatedRecord);
-
-      // Pre-populate enrolled courses immediately so student doesn't wait for background fetch
-      const enrolledList: EnrolledCourseScore[] = updatedRecord.enrolledCourses
-        ? Object.values(updatedRecord.enrolledCourses)
-        : [];
-      const initialVisible = enrolledList.filter(c => c.isPublished !== false);
-      initialVisible.sort((a, b) => (a.courseCode || '').localeCompare(b.courseCode || ''));
-      setLivePublishedCourses(initialVisible);
 
       // Generate Session Token and persist in sessionStorage (Condition 1)
       const token = `st_session_${studentRecord.studentId}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
@@ -304,14 +296,12 @@ export const StudentPortal: React.FC = () => {
       setPinInput('');
       setConfirmPinInput('');
 
-      // Seamlessly transition UI step to view_scores immediately
+      // Strictly verify course & section visibility before displaying scores
+      await fetchStudentDataAndScores(studentRecord.studentId, false);
+
+      // Transition UI step to view_scores
       setStep('view_scores');
       setSuccessMsg('ตั้งรหัสผ่าน 6 หลักสำเร็จ! คุณสามารถใช้รหัสนี้เข้าสู่ระบบในครั้งถัดไป');
-
-      // Refresh student scores & live visibility in background WITHOUT setting global loading indicator
-      fetchStudentDataAndScores(studentRecord.studentId, false).catch(err => {
-        console.warn('Fetch scores background notice:', err);
-      });
     } catch (err: any) {
       console.error('Error setting PIN:', err);
       const msg = err?.message || 'ไม่สามารถบันทึกรหัสผ่านได้ กรุณาลองใหม่อีกครั้ง';
@@ -346,17 +336,9 @@ export const StudentPortal: React.FC = () => {
       const docRef = doc(db, 'student_records', studentRecord.studentId);
 
       if (isValid) {
-        // Pre-populate enrolled courses immediately from in-memory record
-        const enrolledList: EnrolledCourseScore[] = studentRecord.enrolledCourses
-          ? Object.values(studentRecord.enrolledCourses)
-          : [];
-        const initialVisible = enrolledList.filter(c => c.isPublished !== false);
-        initialVisible.sort((a, b) => (a.courseCode || '').localeCompare(b.courseCode || ''));
-        setLivePublishedCourses(initialVisible);
-
         // Reset failed attempts in Firestore asynchronously if previously recorded
         if ((studentRecord.failedAttempts || 0) > 0) {
-          updateDoc(docRef, {
+          updateDocWithRetry(docRef, {
             failedAttempts: 0,
             lockedUntil: 0,
             updatedAt: new Date().toISOString(),
@@ -373,17 +355,15 @@ export const StudentPortal: React.FC = () => {
 
         setSessionToken(token);
         setActiveStudentId(studentRecord.studentId);
-
-        // Immediate transition to view_scores
-        setStep('view_scores');
         setPinInput('');
         setConfirmPinInput('');
         setSuccessMsg(null);
 
-        // Background update for latest course & section publication status without blocking UI
-        fetchStudentDataAndScores(studentRecord.studentId, false).catch(err => {
-          console.warn('Background score update notice:', err);
-        });
+        // Strictly verify course & section visibility before displaying scores
+        await fetchStudentDataAndScores(studentRecord.studentId, false);
+
+        // Transition to view_scores
+        setStep('view_scores');
       } else {
         const newFailedAttempts = (studentRecord.failedAttempts || 0) + 1;
         const willLock = newFailedAttempts >= 5;
@@ -391,7 +371,7 @@ export const StudentPortal: React.FC = () => {
         const lockedUntilTime = willLock ? Date.now() + lockDurationMs : 0;
 
         try {
-          await updateDoc(docRef, {
+          await updateDocWithRetry(docRef, {
             failedAttempts: newFailedAttempts,
             lockedUntil: lockedUntilTime,
             updatedAt: new Date().toISOString(),
@@ -507,47 +487,48 @@ export const StudentPortal: React.FC = () => {
             </div>
           </div>
 
-          {/* Student Identity Card: เลขที่, รหัสนักศึกษา, ชื่อ-นามสกุล, Sec ตามข้อกำหนด */}
-          <div className="bg-gradient-to-br from-indigo-900 via-indigo-950 to-slate-900 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
-            <div className="absolute right-0 top-0 -mt-8 -mr-8 w-40 h-40 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
-            
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-2">
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-500/20 text-indigo-200 border border-indigo-400/30">
-                  <ShieldCheck className="w-3 h-3 mr-1 text-emerald-400" /> ยืนยันตัวตนแล้ว
+          {/* Student Identity Card: เลขที่, รหัสนักศึกษา, ชื่อ-นามสกุล, Sec */}
+          <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4 mb-4">
+              <div>
+                <span className="text-[11px] font-bold text-indigo-600 uppercase tracking-wider block mb-1">
+                  ข้อมูลนักศึกษา
                 </span>
-                <span className="text-xs text-indigo-200/70">ระบบรักษาความเป็นส่วนตัว (Private)</span>
+                <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+                  {displayName}
+                </h1>
               </div>
-              <span className="text-xs text-indigo-300 font-mono">1 Read / Check</span>
+
+              <div className="flex items-center space-x-2">
+                <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <ShieldCheck className="w-3.5 h-3.5 mr-1 text-emerald-600" /> ยืนยันตัวตนแล้ว
+                </span>
+              </div>
             </div>
 
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight mb-4">
-              {displayName}
-            </h1>
-
-            {/* 4 Core attributes grid required by prompt: เลขที่, รหัสนักศึกษา, ชื่อ-นามสกุล, Sec */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-indigo-800/60">
-              <div className="bg-white/5 rounded-xl p-3 backdrop-blur-xs">
-                <div className="text-[11px] font-medium text-indigo-300">เลขที่ (No.)</div>
-                <div className="text-lg font-bold text-white mt-0.5">{displayNo}</div>
+            {/* 4 Core attributes grid: เลขที่, รหัสนักศึกษา, กลุ่มเรียน, สถานะ PIN */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-tight">เลขที่ (No.)</div>
+                <div className="text-lg font-bold text-slate-900 mt-0.5">{displayNo}</div>
               </div>
 
-              <div className="bg-white/5 rounded-xl p-3 backdrop-blur-xs">
-                <div className="text-[11px] font-medium text-indigo-300">รหัสนักศึกษา</div>
-                <div className="text-lg font-bold text-amber-300 font-mono mt-0.5">
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-tight">รหัสนักศึกษา</div>
+                <div className="text-lg font-bold text-indigo-900 font-mono mt-0.5">
                   {studentRecord.studentId}
                 </div>
               </div>
 
-              <div className="bg-white/5 rounded-xl p-3 backdrop-blur-xs">
-                <div className="text-[11px] font-medium text-indigo-300">กลุ่มเรียน (Sec)</div>
-                <div className="text-lg font-bold text-emerald-300 mt-0.5">{displaySec}</div>
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-tight">กลุ่มเรียน (Sec)</div>
+                <div className="text-lg font-bold text-slate-900 mt-0.5">{displaySec}</div>
               </div>
 
-              <div className="bg-white/5 rounded-xl p-3 backdrop-blur-xs">
-                <div className="text-[11px] font-medium text-indigo-300">สถานะ PIN</div>
-                <div className="text-sm font-semibold text-sky-200 mt-1 flex items-center">
-                  <KeyRound className="w-3.5 h-3.5 mr-1 text-sky-400" /> ตั้งรหัสแล้ว
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-tight">สถานะความปลอดภัย</div>
+                <div className="text-sm font-bold text-emerald-700 mt-1 flex items-center">
+                  <KeyRound className="w-3.5 h-3.5 mr-1 text-emerald-600" /> รหัส 6 หลัก
                 </div>
               </div>
             </div>
@@ -568,11 +549,11 @@ export const StudentPortal: React.FC = () => {
             {livePublishedCourses.length === 0 ? (
               <div className="bg-white rounded-2xl p-8 text-center border border-slate-200 shadow-xs">
                 <Clock className="w-12 h-12 text-amber-500 mx-auto mb-3 opacity-80" />
-                <h3 className="text-base font-semibold text-slate-800 mb-1">
-                  ยังไม่มีรายวิชาที่เปิดประกาศคะแนนในขณะนี้
+                <h3 className="text-base font-bold text-slate-800 mb-1">
+                  ยังไม่มีการประกาศคะแนนสำหรับวิชา/กลุ่มเรียนนี้
                 </h3>
                 <p className="text-sm text-slate-500 max-w-md mx-auto">
-                  อาจารย์ผู้สอนยังไม่ได้เปิดการประกาศคะแนนสำหรับกลุ่มเรียนของคุณ หรือกำลังอยู่ระหว่างการประมวลผลคะแนน กรุณาตรวจสอบอีกครั้งภายหลัง
+                  อาจารย์ผู้สอนยังไม่ได้เปิดการประกาศคะแนนสำหรับกลุ่มเรียนของคุณ หรือยังอยู่ระหว่างการประมวลผลคะแนน กรุณาตรวจสอบอีกครั้งภายหลัง
                 </p>
               </div>
             ) : (
@@ -581,13 +562,13 @@ export const StudentPortal: React.FC = () => {
                 return (
                   <div 
                     key={course.courseId} 
-                    className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden transition-all hover:border-indigo-200"
+                    className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden transition-all hover:border-slate-300"
                   >
                     {/* Course Header */}
-                    <div className="p-4 sm:p-5 bg-gradient-to-r from-slate-50 to-indigo-50/40 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                    <div className="p-4 sm:p-5 bg-slate-50/70 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <div className="flex items-center space-x-2">
-                          <span className="px-2.5 py-0.5 rounded-md bg-indigo-600 text-white font-mono text-xs font-bold">
+                          <span className="px-2.5 py-0.5 rounded-md bg-slate-900 text-white font-mono text-xs font-bold">
                             {course.courseCode}
                           </span>
                           <span className="text-xs text-slate-500 font-medium">
@@ -600,118 +581,93 @@ export const StudentPortal: React.FC = () => {
                       </div>
 
                       <div className="text-right">
-                        <span className="inline-block px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                        <span className="inline-block px-3 py-1 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">
                           {course.sec}
                         </span>
                       </div>
                     </div>
 
-                    {/* Score Cards Breakdown conforming to specifications */}
+                    {/* Score Cards Breakdown: Minimalist, clean typography, 5 clear metrics */}
                     <div className="p-4 sm:p-6 space-y-4">
-                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 sm:gap-3">
-                        {/* 1. กรอบที่ 1: เข้าเรียน / (ATTEND) เต็ม 10 */}
-                        <div className="bg-slate-50 hover:bg-slate-100/60 transition-colors rounded-2xl p-2.5 sm:p-3 border border-slate-200/80 text-center flex flex-col justify-between shadow-2xs">
-                          <div className="min-h-[44px] flex flex-col items-center justify-center text-center">
-                            <span className="text-xs sm:text-[13px] font-bold text-slate-800 leading-tight block">
-                              เข้าเรียน
-                            </span>
-                            <span className="text-[10px] sm:text-[11px] font-semibold text-slate-500 tracking-tight leading-tight mt-0.5 block">
-                              (ATTEND)
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                        {/* 1. เข้าเรียน (ATTEN · เต็ม 10) */}
+                        <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200 text-center flex flex-col justify-between">
+                          <div>
+                            <span className="text-xs font-bold text-slate-800 block">เข้าเรียน</span>
+                            <span className="text-[11px] font-medium text-slate-500 block mt-0.5">
+                              (ATTEN · เต็ม 10)
                             </span>
                           </div>
-                          <div className="my-1.5 py-0.5">
-                            <span className="text-xl sm:text-2xl font-black text-slate-800 font-mono tracking-tight block">
+                          <div className="my-2">
+                            <span className="text-2xl sm:text-3xl font-black text-slate-900 font-mono tracking-tight block">
                               {s.ATTEN ?? '-'}
                             </span>
                           </div>
-                          <div className="pt-1 border-t border-slate-100">
-                            <span className="text-[11px] text-slate-500 font-medium">เต็ม 10</span>
-                          </div>
                         </div>
 
-                        {/* 2. กรอบที่ 2: งานในชั้นเรียน / (CLASS ACTIVITY) เต็ม 10 */}
-                        <div className="bg-slate-50 hover:bg-slate-100/60 transition-colors rounded-2xl p-2.5 sm:p-3 border border-slate-200/80 text-center flex flex-col justify-between shadow-2xs">
-                          <div className="min-h-[44px] flex flex-col items-center justify-center text-center">
-                            <span className="text-xs sm:text-[13px] font-bold text-slate-800 leading-tight block">
-                              งานในชั้นเรียน
-                            </span>
-                            <span className="text-[9px] sm:text-[10px] font-semibold text-slate-500 tracking-tight leading-tight mt-0.5 block whitespace-nowrap">
-                              (CLASS ACTIVITY)
+                        {/* 2. งานในชั้นเรียน (CA · เต็ม 10) */}
+                        <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200 text-center flex flex-col justify-between">
+                          <div>
+                            <span className="text-xs font-bold text-slate-800 block">งานในชั้นเรียน</span>
+                            <span className="text-[11px] font-medium text-slate-500 block mt-0.5">
+                              (CA · เต็ม 10)
                             </span>
                           </div>
-                          <div className="my-1.5 py-0.5">
-                            <span className="text-xl sm:text-2xl font-black text-slate-800 font-mono tracking-tight block">
+                          <div className="my-2">
+                            <span className="text-2xl sm:text-3xl font-black text-slate-900 font-mono tracking-tight block">
                               {s.CA ?? '-'}
                             </span>
                           </div>
-                          <div className="pt-1 border-t border-slate-100">
-                            <span className="text-[11px] text-slate-500 font-medium">เต็ม 10</span>
-                          </div>
                         </div>
 
-                        {/* 3. กรอบที่ 3: การบ้าน / (ASSIGNMENT) เต็ม 20 */}
-                        <div className="bg-slate-50 hover:bg-slate-100/60 transition-colors rounded-2xl p-2.5 sm:p-3 border border-slate-200/80 text-center flex flex-col justify-between shadow-2xs">
-                          <div className="min-h-[44px] flex flex-col items-center justify-center text-center">
-                            <span className="text-xs sm:text-[13px] font-bold text-slate-800 leading-tight block">
-                              การบ้าน
-                            </span>
-                            <span className="text-[10px] sm:text-[11px] font-semibold text-slate-500 tracking-tight leading-tight mt-0.5 block">
-                              (ASSIGNMENT)
+                        {/* 3. การบ้าน (AS · เต็ม 20) */}
+                        <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200 text-center flex flex-col justify-between">
+                          <div>
+                            <span className="text-xs font-bold text-slate-800 block">การบ้าน</span>
+                            <span className="text-[11px] font-medium text-slate-500 block mt-0.5">
+                              (AS · เต็ม 20)
                             </span>
                           </div>
-                          <div className="my-1.5 py-0.5">
-                            <span className="text-xl sm:text-2xl font-black text-slate-800 font-mono tracking-tight block">
+                          <div className="my-2">
+                            <span className="text-2xl sm:text-3xl font-black text-slate-900 font-mono tracking-tight block">
                               {s.AS ?? '-'}
                             </span>
                           </div>
-                          <div className="pt-1 border-t border-slate-100">
-                            <span className="text-[11px] text-slate-500 font-medium">เต็ม 20</span>
-                          </div>
                         </div>
 
-                        {/* 4. กรอบที่ 4: สอบกลางภาค / (MIDTERM) เต็ม 25 */}
-                        <div className="bg-slate-50 hover:bg-slate-100/60 transition-colors rounded-2xl p-2.5 sm:p-3 border border-slate-200/80 text-center flex flex-col justify-between shadow-2xs">
-                          <div className="min-h-[44px] flex flex-col items-center justify-center text-center">
-                            <span className="text-xs sm:text-[13px] font-bold text-slate-800 leading-tight block">
-                              สอบกลางภาค
-                            </span>
-                            <span className="text-[10px] sm:text-[11px] font-semibold text-slate-500 tracking-tight leading-tight mt-0.5 block">
-                              (MIDTERM)
+                        {/* 4. สอบกลางภาค (MID · เต็ม 25) */}
+                        <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200 text-center flex flex-col justify-between">
+                          <div>
+                            <span className="text-xs font-bold text-slate-800 block">สอบกลางภาค</span>
+                            <span className="text-[11px] font-medium text-slate-500 block mt-0.5">
+                              (MID · เต็ม 25)
                             </span>
                           </div>
-                          <div className="my-1.5 py-0.5">
-                            <span className="text-xl sm:text-2xl font-black text-indigo-700 font-mono tracking-tight block">
+                          <div className="my-2">
+                            <span className="text-2xl sm:text-3xl font-black text-indigo-700 font-mono tracking-tight block">
                               {s.MID ?? '-'}
                             </span>
                           </div>
-                          <div className="pt-1 border-t border-slate-100">
-                            <span className="text-[11px] text-slate-500 font-medium">เต็ม 25</span>
-                          </div>
                         </div>
 
-                        {/* 5. กรอบที่ 5: รวม / (TOTAL) เต็ม 65 */}
-                        <div className="col-span-2 sm:col-span-1 bg-gradient-to-b from-amber-50 to-amber-100/50 rounded-2xl p-2.5 sm:p-3 border-2 border-amber-300 text-center shadow-xs flex flex-col justify-between">
-                          <div className="min-h-[44px] flex flex-col items-center justify-center text-center">
-                            <span className="text-xs sm:text-[13px] font-black text-amber-950 leading-tight block">
-                              รวม
-                            </span>
-                            <span className="text-[10px] sm:text-[11px] font-bold text-amber-700 tracking-tight leading-tight mt-0.5 block">
-                              (TOTAL)
+                        {/* 5. คะแนนรวม (TOTAL · เต็ม 65) */}
+                        <div className="col-span-2 sm:col-span-1 bg-indigo-50/70 rounded-xl p-3.5 border border-indigo-200 text-center flex flex-col justify-between">
+                          <div>
+                            <span className="text-xs font-extrabold text-indigo-950 block">คะแนนรวม</span>
+                            <span className="text-[11px] font-bold text-indigo-600 block mt-0.5">
+                              (TOTAL · เต็ม 65)
                             </span>
                           </div>
-                          <div className="my-1.5 py-0.5">
-                            <span className="text-2xl sm:text-3xl font-black text-indigo-950 font-mono tracking-tight block">
+                          <div className="my-2">
+                            <span className="text-2xl sm:text-3xl font-black text-indigo-900 font-mono tracking-tight block">
                               {s.TOTAL ?? '-'}
                             </span>
-                          </div>
-                          <div className="pt-1 border-t border-amber-200/70">
-                            <span className="text-[11px] font-bold text-amber-800">เต็ม 65</span>
                           </div>
                         </div>
                       </div>
 
-                      {/* Important Notice required by brief */}
-                      <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-3 text-xs text-amber-900 flex items-start space-x-2.5">
+                      {/* Important Notice */}
+                      <div className="bg-amber-50/80 border border-amber-200/80 rounded-xl p-3 text-xs text-amber-900 flex items-start space-x-2.5">
                         <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                         <div>
                           <strong>หมายเหตุ:</strong> ระบบแสดงคะแนนตามที่อาจารย์ผู้สอนนำเข้าเท่านั้น 

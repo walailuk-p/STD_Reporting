@@ -12,6 +12,8 @@ import {
   initializeFirestore, 
   doc, 
   getDoc,
+  setDoc,
+  updateDoc,
   getDocFromServer, 
   enableNetwork,
   DocumentReference,
@@ -105,13 +107,62 @@ export async function getDocWithRetry(
   throw lastError;
 }
 
+/**
+ * Safely updates or merges a Firestore document with retry, network reconnection, and generous timeout.
+ * Prevents premature timeout aborts on slow networks, iframes, or cold-start connections.
+ */
+export async function updateDocWithRetry(
+  docRef: DocumentReference,
+  data: Record<string, any>,
+  maxRetries = 2,
+  timeoutMs = 15000
+): Promise<void> {
+  let lastError: any = null;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      await Promise.race([
+        setDoc(docRef, data, { merge: true }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('การเชื่อมต่อกับระบบฐานข้อมูลใช้เวลานานเกินไป กรุณาลองใหม่อีกครั้ง')), timeoutMs)
+        )
+      ]);
+      return;
+    } catch (err: any) {
+      lastError = err;
+      const errorMsg = String(err?.message || err || '').toLowerCase();
+      const isTransient =
+        errorMsg.includes('the client is offline') ||
+        errorMsg.includes('client is offline') ||
+        err?.code === 'unavailable' ||
+        errorMsg.includes('unavailable') ||
+        errorMsg.includes('network-request-failed') ||
+        errorMsg.includes('timeout') ||
+        errorMsg.includes('ใช้เวลานานเกินไป');
+
+      if (isTransient && attempt < maxRetries - 1) {
+        try {
+          await enableNetwork(db);
+        } catch {
+          // Ignore enableNetwork errors during retry loop
+        }
+        await new Promise(resolve => setTimeout(resolve, 800 * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError;
+}
+
 export const auth = getAuth(app);
 
-// Helper for verifying authorized instructor accounts (BU domain + runtime project owner)
+export const AUTHORIZED_INSTRUCTOR_EMAIL = 'walailuk.p@bu.ac.th';
+
+// Helper for verifying authorized instructor accounts (strictly walailuk.p@bu.ac.th)
 export function isAllowedInstructorEmail(email?: string | null): boolean {
   if (!email) return false;
   const normalized = email.toLowerCase().trim();
-  return normalized.endsWith('@bu.ac.th') || normalized === 'w.peanchi@gmail.com';
+  return normalized === AUTHORIZED_INSTRUCTOR_EMAIL;
 }
 
 // Google Auth Provider setup with BU domain hint and select_account prompt

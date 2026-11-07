@@ -19,12 +19,12 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, async user => {
       if (user) {
         const email = user.email?.toLowerCase().trim() || '';
-        if (!isAllowedInstructorEmail(email)) {
+        if (email !== 'walailuk.p@bu.ac.th') {
           console.warn('Rejected unauthorized instructor email in App state:', email);
           if (typeof window !== 'undefined') {
             sessionStorage.setItem(
               'bu_auth_rejected_error',
-              `อีเมล "${user.email || ''}" ไม่ใช่บัญชีของมหาวิทยาลัยกรุงเทพ (@bu.ac.th) ระบบอนุญาตเฉพาะอาจารย์ผู้สอนที่ใช้อีเมลลงท้ายด้วย @bu.ac.th เท่านั้น`
+              'เข้าสู่ระบบไม่สำเร็จ: สิทธิ์อาจารย์ผู้สอนจำกัดเฉพาะอีเมล walailuk.p@bu.ac.th เท่านั้น'
             );
           }
           await signOut(auth);

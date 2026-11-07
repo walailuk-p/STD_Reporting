@@ -75,28 +75,181 @@ export function parseCSVWithDetails(content: string): CSVParseResult {
 
   const headerRow = splitLine(lines[0]).map(h => h.trim());
 
-  // Find column index helper matching case-insensitive and partial keywords
-  const findColIndex = (aliases: string[]): number => {
-    return headerRow.findIndex(h => {
-      // Normalize by lowercasing and removing spaces, underscores, dots, hyphens, brackets, parentheses, slashes
-      const norm = h.toLowerCase().replace(/[\s_.\-()/[\]]/g, '');
-      return aliases.some(alias => {
-        const normAlias = alias.toLowerCase().replace(/[\s_.\-()/[\]]/g, '');
-        return norm === normAlias || norm.includes(normAlias) || normAlias.includes(norm);
-      });
-    });
+  // Helper to tokenize a header cell into normalized words
+  const getTokens = (h: string): string[] => {
+    return h
+      .toLowerCase()
+      .split(/[\s_.\-()/[\]\\,:#]+/)
+      .filter(t => t.length > 0);
   };
 
-  const idxNo = findColIndex(['เลขที่(no.)', 'เลขที่(no)', 'เลขที่', 'ลำดับ', 'no.', 'no', '#', 'number']);
-  const idxId = findColIndex(['รหัสนักศึกษา(studentid)', 'รหัสนักศึกษา', 'รหัสประจำตัว', 'studentid', 'student id', 'student_id', 'id']);
-  const idxName = findColIndex(['ชื่อ-นามสกุล(fullname)', 'ชื่อ-นามสกุล', 'ชื่อ นามสกุล', 'ชื่อ', 'name', 'full name', 'fullname', 'student_name']);
-  const idxSec = findColIndex(['กลุ่มเรียน(section/sec)', 'กลุ่มเรียน(section)', 'กลุ่มเรียน(sec)', 'กลุ่มเรียน', 'กลุ่ม', 'section/sec', 'section / sec', 'sec', 'section']);
-  const idxEmail = findColIndex(['อีเมล(email)', 'อีเมล', 'email', 'e-mail', 'mail']);
+  // Helper to normalize header cell without symbols/spaces
+  const getNorm = (h: string): string => {
+    return h.toLowerCase().replace(/[\s_.\-()/[\]\\,:#]/g, '');
+  };
 
-  const idxAtten = findColIndex(['คะแนนเข้าเรียน(attend)', 'คะแนนเข้าเรียน', 'เข้าเรียน', 'atten(คะแนนเข้าเรียน)', 'attend', 'atten', 'attendance']);
-  const idxCa = findColIndex(['คะแนนงานในชั้นเรียน(classactivity)', 'คะแนนงานในชั้นเรียน', 'งานในชั้นเรียน', 'classactivity(คะแนนกิจกรรมในชั้นเรียน)', 'คะแนนกิจกรรมในชั้นเรียน', 'กิจกรรมในชั้นเรียน', 'classactivity', 'class activity', 'ca', 'classwork']);
-  const idxAs = findColIndex(['คะแนนการบ้าน(assignment)', 'คะแนนการบ้าน', 'การบ้าน', 'assignment(คะแนนการบ้าน/งานที่ได้รับมอบหมาย)', 'คะแนนการบ้าน/งานที่ได้รับมอบหมาย', 'งานที่ได้รับมอบหมาย', 'assignment', 'assignments', 'as', 'homework']);
-  const idxMid = findColIndex(['คะแนนสอบกลางภาค(midterm)', 'คะแนนสอบกลางภาค', 'สอบกลางภาค', 'midterm(คะแนนสอบกลางภาค)', 'midterm', 'mid']);
+  const headerTokens = headerRow.map(getTokens);
+  const headerNorms = headerRow.map(getNorm);
+
+  // Column matching logic with strict precision to prevent false positive substring collisions (e.g. 'as' inside 'class')
+  const idxNo = headerRow.findIndex((_, i) => {
+    const tokens = headerTokens[i];
+    const norm = headerNorms[i];
+    return (
+      tokens.includes('no') ||
+      tokens.includes('number') ||
+      norm === '#' ||
+      norm.includes('เลขที่') ||
+      norm.includes('ลำดับ')
+    );
+  });
+
+  const idxId = headerRow.findIndex((_, i) => {
+    const tokens = headerTokens[i];
+    const norm = headerNorms[i];
+    return (
+      tokens.includes('studentid') ||
+      tokens.includes('id') ||
+      norm.includes('studentid') ||
+      norm.includes('student_id') ||
+      norm.includes('รหัสนักศึกษา') ||
+      norm.includes('รหัสประจำตัว') ||
+      norm === 'id' ||
+      norm.includes('รหัส')
+    );
+  });
+
+  const idxName = headerRow.findIndex((_, i) => {
+    const tokens = headerTokens[i];
+    const norm = headerNorms[i];
+    return (
+      tokens.includes('fullname') ||
+      tokens.includes('name') ||
+      norm.includes('ชื่อ-นามสกุล') ||
+      norm.includes('ชื่อนามสกุล') ||
+      norm.includes('ชื่อ') ||
+      norm.includes('fullname')
+    );
+  });
+
+  const idxSec = headerRow.findIndex((_, i) => {
+    const tokens = headerTokens[i];
+    const norm = headerNorms[i];
+    return (
+      tokens.includes('sec') ||
+      tokens.includes('section') ||
+      norm.includes('กลุ่มเรียน') ||
+      norm.includes('กลุ่ม') ||
+      norm.includes('section')
+    );
+  });
+
+  const idxEmail = headerRow.findIndex((_, i) => {
+    const tokens = headerTokens[i];
+    const norm = headerNorms[i];
+    return (
+      tokens.includes('email') ||
+      tokens.includes('mail') ||
+      norm.includes('อีเมล') ||
+      norm.includes('email')
+    );
+  });
+
+  // ATTEN (คะแนนเข้าเรียน เต็ม 10)
+  const idxAtten = headerRow.findIndex((_, i) => {
+    const tokens = headerTokens[i];
+    const norm = headerNorms[i];
+    return (
+      tokens.includes('atten') ||
+      tokens.includes('attend') ||
+      tokens.includes('attendance') ||
+      norm.includes('atten') ||
+      norm.includes('attend') ||
+      norm.includes('attendance') ||
+      norm.includes('เข้าเรียน')
+    );
+  });
+
+  // CA: Class Activity (คะแนนงานในชั้นเรียน/กิจกรรมในชั้นเรียน เต็ม 10)
+  // Strictly matches Class Activity / CA / คะแนนงานในชั้นเรียน / กิจกรรมในชั้นเรียน
+  const idxCa = headerRow.findIndex((_, i) => {
+    const tokens = headerTokens[i];
+    const norm = headerNorms[i];
+
+    // Must NOT be confused with Assignment
+    if (norm.includes('assign') || norm.includes('การบ้าน') || norm.includes('ชิ้นงาน')) {
+      return false;
+    }
+
+    return (
+      tokens.includes('ca') ||
+      tokens.includes('activity') ||
+      tokens.includes('classactivity') ||
+      tokens.includes('classwork') ||
+      norm === 'ca' ||
+      /^ca\d*$/.test(norm) ||
+      norm.includes('classactivity') ||
+      norm.includes('classwork') ||
+      norm.includes('activity') ||
+      norm.includes('งานในชั้นเรียน') ||
+      norm.includes('กิจกรรมในชั้นเรียน') ||
+      norm.includes('กิจกรรม')
+    );
+  });
+
+  // AS: Assignment (คะแนนการบ้าน/ชิ้นงาน/งานที่ได้รับมอบหมาย เต็ม 20)
+  // Strictly looks for 'assign', 'assignment', 'as', 'homework', 'การบ้าน', 'ชิ้นงาน'
+  // And does NOT match 'class' or fallback to general 'คะแนนเก็บ'
+  const idxAs = headerRow.findIndex((_, i) => {
+    const tokens = headerTokens[i];
+    const norm = headerNorms[i];
+
+    // Must NOT match Class Activity or column containing 'class'/'activity' unless 'assign' is explicitly present
+    if (norm.includes('class') && !norm.includes('assign')) {
+      return false;
+    }
+    if (norm.includes('activity') && !norm.includes('assign')) {
+      return false;
+    }
+
+    return (
+      tokens.includes('as') ||
+      tokens.includes('assign') ||
+      tokens.includes('assignment') ||
+      tokens.includes('assignments') ||
+      tokens.includes('homework') ||
+      tokens.includes('hw') ||
+      norm === 'as' ||
+      /^as\d*$/.test(norm) ||
+      norm.includes('assign') ||
+      norm.includes('assignment') ||
+      norm.includes('homework') ||
+      norm.includes('การบ้าน') ||
+      norm.includes('ชิ้นงาน') ||
+      norm.includes('งานที่ได้รับมอบหมาย')
+    );
+  });
+
+  // MID: Midterm (คะแนนสอบกลางภาค เต็ม 25)
+  const idxMid = headerRow.findIndex((_, i) => {
+    const tokens = headerTokens[i];
+    const norm = headerNorms[i];
+
+    // Exclude student ID or other columns
+    if (norm.includes('studentid') || norm.includes('student')) {
+      return false;
+    }
+
+    return (
+      tokens.includes('mid') ||
+      tokens.includes('midterm') ||
+      norm === 'mid' ||
+      /^mid\d*$/.test(norm) ||
+      norm.includes('midterm') ||
+      norm.includes('สอบกลางภาค') ||
+      norm.includes('กลางภาค')
+    );
+  });
 
   if (idxId === -1) {
     throw new Error('ไม่พบคอลัมน์ "รหัสนักศึกษา (Student ID)" ในหัวตารางไฟล์ CSV กรุณาตรวจสอบหัวตาราง');

@@ -64,11 +64,7 @@ import {
   ToggleLeft,
   ToggleRight,
   Clock,
-  Globe,
-  RefreshCw,
-  Smartphone,
-  ChevronDown,
-  ChevronUp
+  RefreshCw
 } from 'lucide-react';
 
 interface InstructorPortalProps {
@@ -196,11 +192,11 @@ export const InstructorPortal: React.FC<InstructorPortalProps> = ({ user }) => {
         if (!isMounted) return;
         if (result && result.user) {
           const email = result.user.email?.toLowerCase().trim() || '';
-          if (!isAllowedInstructorEmail(email)) {
+          if (email !== 'walailuk.p@bu.ac.th') {
             await signOut(auth);
-            const errText = `อีเมล "${result.user.email || ''}" ไม่ใช่บัญชีของมหาวิทยาลัยกรุงเทพ (@bu.ac.th) ระบบอนุญาตเฉพาะอาจารย์ผู้สอนที่ใช้อีเมลลงท้ายด้วย @bu.ac.th เท่านั้น`;
+            const errText = 'เข้าสู่ระบบไม่สำเร็จ: สิทธิ์อาจารย์ผู้สอนจำกัดเฉพาะอีเมล walailuk.p@bu.ac.th เท่านั้น';
             setLoginError(errText);
-            showNotification('error', 'ปฏิเสธการเข้าสู่ระบบ: อนุญาตเฉพาะบัญชีอาจารย์ @bu.ac.th เท่านั้น');
+            showNotification('error', errText);
           } else {
             setLoginError(null);
             showNotification('success', `ยินดีต้อนรับอาจารย์ ${result.user.displayName || result.user.email}`);
@@ -359,11 +355,11 @@ export const InstructorPortal: React.FC<InstructorPortalProps> = ({ user }) => {
       const result = await signInWithPopup(auth, googleProvider);
       const email = result.user.email?.toLowerCase().trim() || '';
 
-      if (!isAllowedInstructorEmail(email)) {
+      if (email !== 'walailuk.p@bu.ac.th') {
         await signOut(auth);
-        const errText = `อีเมล "${result.user.email || ''}" ไม่ใช่บัญชีของมหาวิทยาลัยกรุงเทพ (@bu.ac.th) กรุณาเข้าสู่ระบบด้วยบัญชี @bu.ac.th ของอาจารย์ผู้สอนเท่านั้น`;
+        const errText = 'เข้าสู่ระบบไม่สำเร็จ: สิทธิ์อาจารย์ผู้สอนจำกัดเฉพาะอีเมล walailuk.p@bu.ac.th เท่านั้น';
         setLoginError(errText);
-        showNotification('error', 'ปฏิเสธการเข้าสู่ระบบ: อนุญาตเฉพาะบัญชีอาจารย์ @bu.ac.th เท่านั้น');
+        showNotification('error', errText);
         return;
       }
 
@@ -374,10 +370,23 @@ export const InstructorPortal: React.FC<InstructorPortalProps> = ({ user }) => {
       const isPopupSuppressed = code === 'auth/popup-blocked' || code === 'auth/cancelled-popup-request' || code === 'auth/popup-closed-by-user';
 
       if (isPopupSuppressed) {
-        // Log as non-fatal warning so the build environment doesn't treat expected browser popup suppression as an unhandled crash
+        // Automatic fallback to redirect mode if browser or iframe blocks popups
+        if (code === 'auth/popup-blocked') {
+          console.warn('Google Sign-in popup blocked, attempting automatic redirect sign-in fallback...');
+          try {
+            if (typeof window !== 'undefined') {
+              sessionStorage.setItem('auth_redirect_pending', 'instructor');
+            }
+            await signInWithRedirect(auth, googleProvider);
+            return;
+          } catch (redirectErr) {
+            console.error('Redirect fallback error:', redirectErr);
+          }
+        }
+
         console.warn('Google Sign-in popup notice:', code || err?.message);
         const msg = code === 'auth/popup-blocked'
-          ? 'เบราว์เซอร์หรือ iFrame ป้องกันการเปิดหน้าต่างป็อปอัป (Popup Blocked) กรุณากดอนุญาตป็อปอัป (Allow Popups) ที่ Address Bar หรือใช้ปุ่ม "เข้าสู่ระบบด้วย Redirect Mode" ด้านล่าง'
+          ? 'เบราว์เซอร์หรือ iFrame ป้องกันการเปิดหน้าต่างป็อปอัป (Popup Blocked) กรุณากดอนุญาตป็อปอัปที่ Address Bar หรือลองอีกครั้ง'
           : code === 'auth/popup-closed-by-user'
           ? 'หน้าต่างเข้าสู่ระบบถูกปิดก่อนทำรายการสำเร็จ กรุณากดเข้าสู่ระบบใหม่อีกครั้ง'
           : 'มีการเปิดหน้าต่างเข้าสู่ระบบซ้ำ กรุณารอสักครู่แล้วลองใหม่อีกครั้ง';
@@ -1202,94 +1211,45 @@ export const InstructorPortal: React.FC<InstructorPortalProps> = ({ user }) => {
   const lockedCount = students.filter(s => s.isLocked).length;
 
   // Login view if not logged in
+  // Login view if not logged in
   if (!user) {
-    const currentHost = typeof window !== 'undefined' ? (window.location.hostname || 'score-ma102.netlify.app') : 'score-ma102.netlify.app';
-    const activeProjectId = resolvedFirebaseConfig.projectId || 'studious-axe-6ct7q';
-    const activeAuthDomain = resolvedFirebaseConfig.authDomain || `${activeProjectId}.firebaseapp.com`;
-
     return (
-      <div className="max-w-xl mx-auto py-10 px-4">
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-md p-6 sm:p-8 text-center space-y-6">
+      <div className="max-w-md mx-auto py-12 px-4">
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-md p-6 sm:p-8 text-center space-y-5">
           <div>
-            <div className="w-14 h-14 bg-amber-50 border border-amber-200 rounded-2xl flex items-center justify-center mx-auto mb-4 text-amber-600 shadow-xs">
-              <BookOpen className="w-7 h-7" />
-            </div>
-            <h2 className="text-2xl font-bold text-slate-900">สำหรับอาจารย์ผู้สอน</h2>
-            <p className="text-sm text-slate-500 mt-2">
-              เข้าสู่ระบบเพื่อจัดการรายวิชา นำเข้าไฟล์คะแนน CSV และควบคุมการประกาศผลคะแนน
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">สำหรับอาจารย์ผู้สอน</h2>
+            <p className="text-xs text-slate-400 mt-1.5 font-medium">
+              สิทธิ์การเข้าถึงจำกัดเฉพาะ: <span className="font-mono text-indigo-600 font-semibold">walailuk.p@bu.ac.th</span>
             </p>
-          </div>
-
-          {/* Security requirement notice */}
-          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-900 text-left flex items-start space-x-3 shadow-xs">
-            <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              <strong className="font-bold text-amber-950">ข้อกำหนดความปลอดภัยของระบบ:</strong>
-              <p className="mt-1 text-amber-800 leading-relaxed">
-                ระบบเปิดสิทธิ์ให้อาจารย์ล็อกอินด้วย Google Account ของมหาวิทยาลัยกรุงเทพ (โดเมน <code className="bg-amber-100/80 px-1.5 py-0.5 rounded font-mono font-semibold text-amber-900">@bu.ac.th</code>) เท่านั้น หากใช้อีเมลส่วนตัว (@gmail.com) หรืออีเมลอื่น ระบบจะปฏิเสธการเข้าถึงทันที
-              </p>
-            </div>
           </div>
 
           {/* Prominent Login Error Alert Box if any */}
           {loginError && (
-            <div className="bg-rose-50 border-2 border-rose-300 rounded-2xl p-4 sm:p-5 text-left text-xs text-rose-950 shadow-sm animate-in fade-in duration-200 space-y-3">
-              <div className="flex items-start space-x-3">
-                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-                <div className="flex-1 space-y-2">
-                  <div className="font-bold text-sm text-rose-950 flex items-center justify-between">
+            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-left text-xs text-rose-950 shadow-xs animate-in fade-in duration-200">
+              <div className="flex items-start space-x-2.5">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div className="flex-1 space-y-1">
+                  <div className="font-bold text-xs text-rose-950 flex items-center justify-between">
                     <span>การเข้าสู่ระบบไม่สำเร็จ</span>
                     <button
                       type="button"
                       onClick={() => setLoginError(null)}
-                      className="text-rose-500 hover:text-rose-800 p-1 cursor-pointer transition-colors"
+                      className="text-rose-400 hover:text-rose-700 p-0.5 cursor-pointer transition-colors"
                       title="ปิดข้อความแจ้งเตือน"
                     >
-                      <X className="w-4 h-4" />
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
                   <p className="text-rose-900 leading-relaxed font-medium">
                     {loginError}
                   </p>
-
-                  {/* If unauthorized-domain or netlify domain error */}
-                  {(loginError.includes('Authorized domains') || loginError.includes('unauthorized-domain')) && (
-                    <div className="mt-3 p-3 bg-white rounded-xl border border-rose-300 space-y-2">
-                      <div className="text-[11px] font-bold text-rose-900">
-                        โดเมนของ Netlify ที่ต้องนำไปใส่ใน Firebase Console:
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <code className="flex-1 bg-slate-100 border border-slate-300 px-3 py-2 rounded-lg text-slate-900 font-mono text-xs select-all font-bold">
-                          {currentHost}
-                        </code>
-                        <button
-                          type="button"
-                          onClick={copyCurrentDomain}
-                          className="px-3 py-2 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-medium text-xs rounded-lg transition shrink-0 flex items-center space-x-1 cursor-pointer"
-                        >
-                          {copiedHostname ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                          <span>{copiedHostname ? 'คัดลอกแล้ว' : 'คัดลอก Domain'}</span>
-                        </button>
-                      </div>
-                      <div className="text-[11px] text-slate-700 leading-relaxed bg-amber-50/80 p-2.5 rounded-lg border border-amber-200">
-                        <p className="font-semibold text-amber-900">📌 วิธีแก้ทันทีใน 1 นาที:</p>
-                        <ol className="list-decimal list-inside space-y-1 mt-1 text-slate-700">
-                          <li>เปิด <strong>Firebase Console</strong> &rarr; เลือกโปรเจกต์ <code>{activeProjectId}</code></li>
-                          <li>เมนูซ้าย <strong>Authentication</strong> &rarr; แท็บ <strong>Settings</strong></li>
-                          <li>เลื่อนลงไปที่ <strong>Authorized domains</strong> &rarr; กด <strong>Add domain</strong></li>
-                          <li>วาง <code>{currentHost}</code> แล้วกด <strong>Save</strong></li>
-                        </ol>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
           )}
 
-          {/* Action Buttons */}
-          <div className="space-y-3 pt-2">
-            {/* Primary Google Login Button (Popup mode) */}
+          {/* Single Primary Google Login Button */}
+          <div className="pt-2">
             <button
               type="button"
               disabled={isLoggingIn}
@@ -1298,7 +1258,7 @@ export const InstructorPortal: React.FC<InstructorPortalProps> = ({ user }) => {
             >
               {isLoggingIn ? (
                 <>
-                  <RefreshCw className="w-5 h-5 animate-spin text-slate-400" />
+                  <RefreshCw className="w-4 h-4 animate-spin text-slate-400" />
                   <span>กำลังเชื่อมต่อกับ Google Authentication...</span>
                 </>
               ) : (
@@ -1325,98 +1285,6 @@ export const InstructorPortal: React.FC<InstructorPortalProps> = ({ user }) => {
                 </>
               )}
             </button>
-
-            {/* Secondary Button: Redirect Mode for Mobile / Safari */}
-            <button
-              type="button"
-              disabled={isLoggingIn}
-              onClick={() => handleGoogleLogin(true)}
-              className="w-full py-2.5 px-4 rounded-xl border border-slate-300 hover:bg-slate-50 active:scale-[0.99] disabled:opacity-60 text-slate-700 font-medium text-xs transition flex items-center justify-center space-x-2 cursor-pointer"
-            >
-              <Smartphone className="w-4 h-4 text-slate-500" />
-              <span>เข้าสู่ระบบด้วย Redirect Mode (กรณีมือถือ / Safari / หน้าต่างป็อปอัปไม่ขึ้น)</span>
-            </button>
-          </div>
-
-          {/* Interactive Collapsible Checklist for Netlify & Firebase Setup */}
-          <div className="pt-2 border-t border-slate-100 text-left">
-            <button
-              type="button"
-              onClick={() => setShowNetlifyGuide(!showNetlifyGuide)}
-              className="w-full flex items-center justify-between py-2 text-xs font-semibold text-slate-700 hover:text-indigo-600 transition cursor-pointer"
-            >
-              <span className="flex items-center space-x-1.5">
-                <Globe className="w-4 h-4 text-indigo-500" />
-                <span>ขั้นตอนตั้งค่าบน Firebase Console & Netlify สำหรับ {currentHost}</span>
-              </span>
-              {showNetlifyGuide ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            </button>
-
-            {showNetlifyGuide && (
-              <div className="mt-3 p-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-slate-700 space-y-3 animate-in fade-in duration-150">
-                <div className="font-bold text-slate-900 flex items-center space-x-1.5">
-                  <CheckCircle className="w-4 h-4 text-emerald-600" />
-                  <span>3 ขั้นตอนสำคัญเพื่อให้ Login บน Netlify สำเร็จ 100%:</span>
-                </div>
-
-                <div className="space-y-3">
-                  {/* Step 1: Authorized domains */}
-                  <div className="p-3 bg-white rounded-xl border border-slate-200 space-y-2">
-                    <strong className="text-indigo-900 block font-semibold text-xs">
-                      1. เพิ่ม Domain ใน Firebase Authorized Domains:
-                    </strong>
-                    <p className="text-slate-600 leading-relaxed text-[11px]">
-                      ไปที่ <strong>Firebase Console</strong> &rarr; เลือกโปรเจกต์ <code>{activeProjectId}</code> &rarr; <strong>Authentication</strong> &rarr; เมนู <strong>Settings</strong> &rarr; เลื่อนลงไปที่ <strong>Authorized domains</strong> &rarr; กด <strong>Add domain</strong> &rarr; เพิ่มโดเมนต่อไปนี้:
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <code className="bg-slate-100 border border-slate-200 px-2 py-1 rounded text-indigo-700 font-mono text-[11px] font-bold">
-                        {currentHost}
-                      </code>
-                      <button
-                        type="button"
-                        onClick={copyCurrentDomain}
-                        className="px-2 py-1 bg-slate-800 text-white rounded text-[10px] font-medium hover:bg-slate-700"
-                      >
-                        {copiedHostname ? 'คัดลอกแล้ว' : 'คัดลอก'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Step 2: Google Cloud Console Credentials */}
-                  <div className="p-3 bg-white rounded-xl border border-slate-200 space-y-1.5">
-                    <strong className="text-indigo-900 block font-semibold text-xs">
-                      2. ตรวจสอบ Authorized JavaScript origins (Google Cloud Console):
-                    </strong>
-                    <p className="text-slate-600 leading-relaxed text-[11px]">
-                      เมื่อเปิดใช้งาน Google Sign-In ใน Firebase ระบบจะสร้าง OAuth Client ID ใน Google Cloud Console อัตโนมัติ:
-                    </p>
-                    <div className="bg-slate-50 p-2 rounded border border-slate-200 text-[11px] font-mono space-y-1">
-                      <div><strong>Authorized JavaScript origins:</strong> <code>https://{currentHost}</code></div>
-                      <div><strong>Authorized redirect URIs:</strong> <code>https://{activeAuthDomain}/__/auth/handler</code></div>
-                    </div>
-                  </div>
-
-                  {/* Step 3: Netlify Environment Variables */}
-                  <div className="p-3 bg-white rounded-xl border border-slate-200 space-y-1.5">
-                    <strong className="text-indigo-900 block font-semibold text-xs">
-                      3. ตั้งค่า Environment Variables บน Netlify:
-                    </strong>
-                    <p className="text-slate-600 leading-relaxed text-[11px]">
-                      ไปที่ <strong>Netlify Dashboard</strong> &rarr; <strong>Site configuration</strong> &rarr; <strong>Environment variables</strong> &rarr; ใส่คีย์ต่อไปนี้ให้ตรงกับโปรเจกต์:
-                    </p>
-                    <ul className="space-y-1 bg-slate-50 p-2 rounded border border-slate-200 text-[11px] font-mono text-slate-700">
-                      <li><code>VITE_FIREBASE_API_KEY</code> = {resolvedFirebaseConfig.apiKey ? `${resolvedFirebaseConfig.apiKey.slice(0, 8)}...` : '(ของคุณ)'}</li>
-                      <li><code>VITE_FIREBASE_AUTH_DOMAIN</code> = {activeAuthDomain}</li>
-                      <li><code>VITE_FIREBASE_PROJECT_ID</code> = {activeProjectId}</li>
-                      <li><code>VITE_FIREBASE_FIRESTORE_DATABASE_ID</code> = {resolvedFirebaseConfig.firestoreDatabaseId || 'ai-studio-studentscoreport-ce9f300f-6936-4725-995d-393fe9cdc335'}</li>
-                    </ul>
-                    <p className="text-[11px] text-amber-800 bg-amber-50 p-2 rounded">
-                      ⚠️ หลังจากบันทึกค่าใน Netlify แล้ว อย่าลืมกด <strong>Deploys &rarr; Trigger deploy &rarr; Clear cache and deploy site</strong> เพื่อให้เว็บ Build ด้วยค่าใหม่
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -1451,7 +1319,7 @@ export const InstructorPortal: React.FC<InstructorPortalProps> = ({ user }) => {
             <span className="font-bold text-base">{user.displayName || 'อาจารย์ผู้สอน'}</span>
             {isBuEmail ? (
               <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
-                Verified @bu.ac.th
+                Verified: walailuk.p@bu.ac.th
               </span>
             ) : (
               <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-400/30">
@@ -1580,27 +1448,22 @@ export const InstructorPortal: React.FC<InstructorPortalProps> = ({ user }) => {
           {/* การจัดการรายวิชาและคะแนน (Course & Grade Management) */}
           {/* ============================================================ */}
           {activeSectionView === 'course_mgmt' && (
-            <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-6">
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-6">
               {/* Module 1 Header */}
-              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
-                    <Sliders className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-900 flex items-center">
-                      <span>การจัดการรายวิชาและคะแนน</span>
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      ควบคุมการเปิด/ปิดประกาศคะแนนแยกตามกลุ่มเรียน (Section) และจัดการข้อมูลรายวิชา
-                    </p>
-                  </div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">
+                    การจัดการรายวิชาและคะแนน
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    ควบคุมการเปิด/ปิดประกาศคะแนนระดับรายวิชา (Master Switch) และแยกตามกลุ่มเรียน (Section)
+                  </p>
                 </div>
 
                 <div className="flex items-center space-x-2">
                   <button
                     onClick={handleOpenEditCourse}
-                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition cursor-pointer"
+                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100 transition cursor-pointer"
                   >
                     <Edit2 className="w-3.5 h-3.5" />
                     <span>แก้ไขข้อมูลวิชา</span>
@@ -1608,7 +1471,7 @@ export const InstructorPortal: React.FC<InstructorPortalProps> = ({ user }) => {
 
                   <button
                     onClick={() => setCourseToDelete(activeCourse)}
-                    className="flex items-center space-x-1 px-3 py-1.5 rounded-xl text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition cursor-pointer"
+                    className="flex items-center space-x-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     <span>ลบวิชา</span>
@@ -1616,50 +1479,78 @@ export const InstructorPortal: React.FC<InstructorPortalProps> = ({ user }) => {
                 </div>
               </div>
 
-              {/* Course Profile Summary Banner */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-100">
+              {/* Course Profile & Master Switch */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 rounded-xl bg-slate-50 border border-slate-100">
                 <div>
                   <span className="text-[11px] font-semibold text-slate-400 block uppercase">รหัสวิชา</span>
-                  <span className="text-lg font-black font-mono text-indigo-900 block mt-0.5">{activeCourse.courseCode}</span>
+                  <span className="text-base font-bold font-mono text-slate-900 block mt-0.5">{activeCourse.courseCode}</span>
                 </div>
                 <div className="md:col-span-2">
                   <span className="text-[11px] font-semibold text-slate-400 block uppercase">ชื่อรายวิชา</span>
-                  <span className="text-base font-bold text-slate-800 block mt-0.5">{activeCourse.courseName}</span>
+                  <span className="text-base font-bold text-slate-900 block mt-0.5">{activeCourse.courseName}</span>
                 </div>
                 <div>
                   <span className="text-[11px] font-semibold text-slate-400 block uppercase">ภาคการศึกษา / นักศึกษา</span>
                   <span className="text-sm font-semibold text-slate-700 block mt-0.5">
-                    {activeCourse.semester} &nbsp;|&nbsp; {students.length} คน
+                    {activeCourse.semester} · {students.length} คน
                   </span>
                 </div>
               </div>
 
+              {/* Master Course Publication Status */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border border-slate-200 bg-white">
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm font-bold text-slate-900">ประกาศผลคะแนนระดับรายวิชา (Master Switch)</span>
+                    <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                      activeCourse.isPublished ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {activeCourse.isPublished ? 'เปิดประกาศ' : 'ปิดประกาศ (ซ่อนทั้งหมด)'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    หากปิดสวิตช์นี้ นักศึกษาทุกคนในรายวิชาจะไม่สามารถดูคะแนนได้ไม่ว่าจะอยู่กลุ่มเรียนใด
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleToggleCoursePublish(activeCourse.id, activeCourse.isPublished)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer shrink-0 ${
+                    activeCourse.isPublished
+                      ? 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+                      : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs'
+                  }`}
+                >
+                  {activeCourse.isPublished ? 'ปิดประกาศทั้งวิชา' : 'เปิดประกาศทั้งวิชา'}
+                </button>
+              </div>
+
               {/* Section-Level Visibility Controls (แยกตามกลุ่มเรียน) */}
-              <div className="bg-slate-50/70 p-5 sm:p-6 rounded-2xl border border-slate-200 space-y-4">
+              <div className="space-y-3 pt-2">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center">
                       <Sliders className="w-4 h-4 text-indigo-600 mr-1.5" />
-                      แยกตามกลุ่มเรียน (SECTION-LEVEL VISIBILITY)
+                      เปิด/ปิดประกาศแยกตามกลุ่มเรียน (Section-Level Visibility)
                     </span>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      เปิดหรือปิดประกาศคะแนนแยกแต่ละกลุ่มเรียนได้อิสระ
+                      นักศึกษาจะมองเห็นผลคะแนนได้เมื่อเปิดทั้ง Master Switch และเปิดกลุ่มเรียนของตนเอง
                     </p>
                   </div>
 
-                  <div className="flex items-center space-x-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
+                  <div className="flex items-center space-x-2">
                     <button
                       type="button"
                       onClick={() => handleBulkSetSectionsPublish(true)}
-                      className="text-xs font-bold text-emerald-700 hover:text-emerald-800 transition cursor-pointer"
+                      className="px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 rounded-lg transition cursor-pointer border border-emerald-200"
                     >
                       เปิดทุก Sec
                     </button>
-                    <span className="text-slate-300 font-light">|</span>
                     <button
                       type="button"
                       onClick={() => handleBulkSetSectionsPublish(false)}
-                      className="text-xs font-bold text-rose-600 hover:text-rose-700 transition cursor-pointer"
+                      className="px-2.5 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer border border-rose-200"
                     >
                       ปิดทุก Sec
                     </button>
@@ -1675,31 +1566,25 @@ export const InstructorPortal: React.FC<InstructorPortalProps> = ({ user }) => {
                     return (
                       <div 
                         key={sec}
-                        className={`p-4 rounded-xl border transition flex items-center justify-between ${
-                          isSecPublished
-                            ? 'bg-white border-emerald-300 shadow-2xs ring-1 ring-emerald-400/20'
-                            : 'bg-white/70 border-slate-200 opacity-80'
-                        }`}
+                        className="p-3.5 rounded-xl border border-slate-200 bg-white flex items-center justify-between hover:border-slate-300 transition"
                       >
                         <div>
-                          <div className="font-bold text-sm text-slate-900 flex items-center">
-                            <span>{sec}</span>
-                          </div>
-                          <span className="text-[11px] text-slate-500 mt-0.5 block">
-                            นักศึกษา {countInSec} คน · {isSecPublished ? 'เปิดประกาศ' : 'ปิดประกาศ'}
+                          <div className="font-bold text-sm text-slate-900">{sec}</div>
+                          <span className="text-xs text-slate-500 mt-0.5 block">
+                            นักศึกษา {countInSec} คน
                           </span>
                         </div>
 
                         <button
                           type="button"
                           onClick={() => handleToggleSectionPublish(sec)}
-                          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center space-x-1 ${
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                             isSecPublished
-                              ? 'bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100 shadow-2xs'
-                              : 'bg-slate-100 text-slate-600 border border-slate-300 hover:bg-slate-200'
+                              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
+                              : 'bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200'
                           }`}
                         >
-                          <span>{isSecPublished ? 'เปิดอยู่' : 'ปิดอยู่'}</span>
+                          {isSecPublished ? 'เปิดประกาศ' : 'ปิดประกาศ'}
                         </button>
                       </div>
                     );

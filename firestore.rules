@@ -24,6 +24,12 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isAuthorizedInstructor() {
+      return request.auth != null && 
+        request.auth.token.email != null && 
+        request.auth.token.email.lower() == 'walailuk.p@bu.ac.th';
+    }
+
     // Health check endpoint for connection test
     match /test/{docId} {
       allow get: if true;
@@ -33,17 +39,17 @@ service cloud.firestore {
     match /courses/{courseId} {
       // Instructors can list all courses; students can only get specific course document to verify isPublished
       allow get: if isValidId(courseId);
-      allow list: if isSignedIn();
+      allow list: if isAuthorizedInstructor();
 
       // Create course
-      allow create: if isSignedIn() && isValidId(courseId);
+      allow create: if isAuthorizedInstructor() && isValidId(courseId);
 
       // Update and delete course
-      allow update, delete: if isSignedIn() && isValidId(courseId);
+      allow update, delete: if isAuthorizedInstructor() && isValidId(courseId);
 
       // Subcollection: student rosters and individual course scores
       match /students/{studentId} {
-        allow read, write: if isSignedIn();
+        allow read, write: if isAuthorizedInstructor();
       }
     }
 
@@ -55,12 +61,12 @@ service cloud.firestore {
       allow list: if false;
 
       // Instructors can create, overwrite, or delete student records
-      allow create, delete: if isSignedIn();
+      allow create, delete: if isAuthorizedInstructor();
 
       // Updates can be performed by an instructor OR student setting their initial PIN / recording failed attempts
       allow update: if (
         // Instructor full update
-        isSignedIn() ||
+        isAuthorizedInstructor() ||
         // Student first-time PIN initialization (only allowed if pinHash was previously empty)
         (
           isValidId(studentId) &&
